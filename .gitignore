@@ -1,0 +1,10 @@
+**/__pycache__/
+**/.venv/
+**/venv/
+**/.pytest_cache/
+**/.vscode/
+*.code-workspace
+*.zip
+.env
+*.db
+.DS_Store
