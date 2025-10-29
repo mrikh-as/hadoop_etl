@@ -1,18 +1,29 @@
 import os
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import *
+from pyspark.sql.utils import AnalysisException
 from base_etl import BaseETL
-from spark_config import SparkConfig, ETLConfig
+from spark_config import SparkConfig
+from etl_config import ETLConfig
 
 
 class BankingPricingETL(BaseETL):
     def extract(self):
         self.logger.info("Извлекаем диалоги...")
         sql_query = os.getenv("DIALOG_EXTRACTION_SQL", self._get_default_sql())
-        self.raw_data = self.spark.sql(sql_query)
+        try:
+            self.raw_data = self.spark.sql(sql_query)
+            self.logger.info("Успешно извлекли данные")
+
+        except AnalysisException as e:
+            self.logger.error("Ошибка доступа к таблице")
+            raise RuntimeError(f"Не смогли извлечь данные") from e
+
+        except Exception as e:
+            self.logger.error("Не смогли извлечь данные по неожиданным причинам")
+            raise RuntimeError("Неожиданная ошибка при извлечении данных") from e
 
     def _get_default_sql(self) -> str:
-        """Возвращает SQL по умолчанию если переменная окружения не задана"""
         return """
                 WITH dialog_phrases AS (
                     SELECT 
@@ -46,85 +57,9 @@ class BankingPricingETL(BaseETL):
             """
 
     def transform(self):
-        """Трансформируем данные"""
         self.logger.info("Трансформируем диалоги...")
 
-        self.transformed_data = (
-            self.raw_data.filter(col("dialog_text").isNotNull())
-            .withColumn(
-                "clean_text",
-                lower(regexp_replace(col("dialog_text"), "[^а-яА-Яa-zA-Z0-9%$€ ]", "")),
-            )
-            .withColumn(
-                "detected_bank",
-                when(col("clean_text").contains("сбер"), "Sberbank")
-                .when(col("clean_text").contains("втб"), "VTB")
-                .when(col("clean_text").contains("тинькофф"), "Tinkoff")
-                .otherwise("Other"),
-            )
-            .withColumn(
-                "detected_country",
-                when(col("clean_text").contains("сша"), "USA")
-                .when(col("clean_text").contains("германи"), "Germany")
-                .when(col("clean_text").contains("казахстан"), "Kazakhstan")
-                .when(col("clean_text").contains("кита"), "China")
-                .when(
-                    col("clean_text").contains("англи")
-                    | col("clean_text").contains("британ"),
-                    "UK",
-                )
-                .otherwise("Other"),
-            )
-            .withColumn("contains_commission", col("clean_text").contains("комисси"))
-            .withColumn("contains_fee", col("clean_text").contains("плат"))
-            .withColumn("word_count", size(split(col("dialog_text"), " ")))
-            .withColumn("processing_timestamp", current_timestamp())
-        )
-
-        # Агрегируем для аналитики
-        self.final_data = (
-            self.transformed_data.groupBy("detected_bank", "detected_country")
-            .agg(
-                count("*").alias("total_dialogs"),
-                sum(when(col("contains_commission"), 1).otherwise(0)).alias(
-                    "commission_mentions"
-                ),
-                sum(when(col("contains_fee"), 1).otherwise(0)).alias("fee_mentions"),
-                avg("word_count").alias("avg_dialog_length"),
-            )
-            .withColumn(
-                "commission_ratio",
-                round(col("commission_mentions") / col("total_dialogs"), 2),
-            )
-            .withColumn(
-                "fee_ratio", round(col("fee_mentions") / col("total_dialogs"), 2)
-            )
-            .orderBy(desc("total_dialogs"))
-        )
+        self.transformed_data = []
 
     def load(self):
-        """Загружаем результаты"""
         self.logger.info("Загружаем результаты...")
-
-        # Показываем сырые данные
-        self.logger.info("📝 Сырые данные:")
-        self.raw_data.show(truncate=False)
-
-        # Показываем трансформированные данные
-        self.logger.info("🔄 Трансформированные данные:")
-        self.transformed_data.select(
-            "dialog_id", "detected_bank", "detected_country", "contains_commission"
-        ).show()
-
-        # Показываем финальные результаты
-        self.logger.info("📊 Финальные результаты:")
-        self.final_data.show()
-
-        # Логируем статистику
-        self.logger.info("📈 Статистика обработки:")
-        for row in self.final_data.collect():
-            self.logger.info(
-                f"   {row['detected_bank']} -> {row['detected_country']}: "
-                f"{row['total_dialogs']} диалогов, "
-                f"комиссия: {row['commission_ratio']}"
-            )
