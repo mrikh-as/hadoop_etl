@@ -52,34 +52,50 @@ class GigaChatHelper:
 
             raise e
 
-    def get_help(self, message, prompt):
 
-        chat = self.create_gigachat_instance()
+import os
 
-        messages = [SystemMessage(content=prompt), HumanMessage(content=message)]
+import time
 
-        logger.debug(f"trying to get giga response")
 
-        response = chat.invoke(messages)
+GIGACHAT_API_URL = os.environ.get("GIGACHAT_API_URL")
 
-        text = response.content.strip()
+ACCESS_TOKEN = os.environ.get("JPY_API_TOKEN")
 
-        logger.debug(f"got giga response")
 
-        return text
+print(GIGACHAT_API_URL, ACCESS_TOKEN)
 
-    def help_coordinates(self, message):
 
-        logger.debug(f"giga helping with coordinates")
+import requests
 
-        prompt = self.prompts["coordinates"]
+import json
 
-        return self.get_help(message, prompt=prompt)
 
-    def help_floors(self, message):
+HEADERS = {
+    "Authorization": f"Bearer {ACCESS_TOKEN}",
+    "Content-Type": "application/json",
+}
 
-        logger.debug(f"giga helping with floors")
 
-        prompt = self.prompts["floors"]
+def completions(query: str):
 
-        return self.get_help(message, prompt=prompt)
+    data = {
+        "model": "GigaChat",
+        "messages": [{"role": "user", "content": f"{query}"}],
+        "n": 1,
+        "temperature": 0.01,
+    }
+
+    response = requests.post(
+        url=GIGACHAT_API_URL + "/chat/completions",
+        headers=HEADERS,
+        json=data,
+    )
+
+    if response.ok:
+
+        return json.dumps(response.json(), indent=4, ensure_ascii=False)
+
+    else:
+
+        return response.text
