@@ -1,19 +1,16 @@
-# main.py
-import os
 from dotenv import load_dotenv
+from env_config import EnvConfig
+from spark_config import SparkConfig
+from etl_config import ETLConfig
 from banking_etl import BankingPricingETL
-from config import SparkConfig, ETLConfig
 
 
 def main():
-    # Загружаем настройки
     load_dotenv()
-
-    # Создаем конфиги
+    config = EnvConfig.from_env()
+    config.setup()
     spark_config = SparkConfig.from_env()
     etl_config = ETLConfig.from_env()
-
-    # Запускаем ETL
     etl = BankingPricingETL(spark_config, etl_config)
     etl.run()
 

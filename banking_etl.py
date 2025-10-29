@@ -2,14 +2,11 @@
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import *
 from base_etl import BaseETL
-from config import SparkConfig, ETLConfig
+from spark_config import SparkConfig, ETLConfig
 
 
 class BankingPricingETL(BaseETL):
-    """ETL для банковских данных с полной конфигурацией"""
-
     def extract(self):
-        """Извлекаем данные"""
         self.logger.info("Извлекаем банковские диалоги...")
 
         test_data = [
