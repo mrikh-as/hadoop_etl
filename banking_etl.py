@@ -1,4 +1,4 @@
-# banking_etl.py
+import os
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import *
 from base_etl import BaseETL
@@ -7,39 +7,43 @@ from spark_config import SparkConfig, ETLConfig
 
 class BankingPricingETL(BaseETL):
     def extract(self):
-        self.logger.info("Извлекаем банковские диалоги...")
+        self.logger.info("Извлекаем диалоги...")
+        sql_query = os.getenv("DIALOG_EXTRACTION_SQL", self._get_default_sql())
+        self.raw_data = self.spark.sql(sql_query)
 
-        test_data = [
-            (
-                1,
-                "Клиент: Перевод 1000$ в США через Сбербанк. Сотрудник: Комиссия 1.5%, минимум 50$",
-                "2024-01-01",
-            ),
-            (
-                2,
-                "Клиент: Условия перевода в Казахстан через ВТБ? Сотрудник: Комиссия 2%, фиксированная плата 30$",
-                "2024-01-01",
-            ),
-            (
-                3,
-                "Клиент: Перевод евро в Германию через Тинькофф. Сотрудник: Комиссия 1.2%, минимальная сумма 100€",
-                "2024-01-02",
-            ),
-            (
-                4,
-                "Клиент: Процедура перевода в Китай. Сотрудник: Комиссия 1.8%, время обработки 3-5 дней",
-                "2024-01-02",
-            ),
-            (
-                5,
-                "Клиент: Условия перевода крупной суммы в UK. Сотрудник: Для сумм свыше 10000$ комиссия 1%",
-                "2024-01-03",
-            ),
-        ]
-
-        self.raw_data = self.spark.createDataFrame(
-            test_data, ["dialog_id", "dialog_text", "processing_date"]
-        )
+    def _get_default_sql(self) -> str:
+        """Возвращает SQL по умолчанию если переменная окружения не задана"""
+        return """
+                WITH dialog_phrases AS (
+                    SELECT 
+                        t1.object_id as dialog_id,
+                        t2.startedat as phrase_time,
+                        t2.speakertype,
+                        t2.text,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY t1.object_id 
+                            ORDER BY t2.startedat ASC
+                        ) as phrase_order
+                    FROM prx_ved_peregovory_internal_kk_yadro_overcast_dspc.t_ocst_dialog t1
+                    LEFT JOIN prx_ved_peregovory_internal_kk_yadro_overcast_dspc.t_ocst_phrase t2 
+                        ON t2.dialog_entityid = t1.object_id
+                    WHERE t1.split_entityid = '40faaaf4-c613-40b2-8f6d-2bfff986f1de'
+                        AND t2.text IS NOT NULL
+                        AND t1.startedat >= now() - interval '7' days
+                )
+                SELECT 
+                    dialog_id,
+                    CONCAT_WS(
+                        '\n',
+                        COLLECT_LIST(
+                            CONCAT(speakertype, ': ', text)
+                            ORDER BY phrase_order ASC
+                        )
+                    ) as full_dialog_text
+                FROM dialog_phrases
+                GROUP BY dialog_id
+                ORDER BY dialog_id
+            """
 
     def transform(self):
         """Трансформируем данные"""
